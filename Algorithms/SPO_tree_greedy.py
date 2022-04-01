@@ -30,7 +30,7 @@ class SPOTree(object):
     SPO_weight_param = 1.0 -> SPO loss
     SPO_weight_param = 0.0 -> MSE loss (i.e., CART)
   
-  SPO_full_error: if SPO error is used, are the full errors computed for split evaluation, 
+  SPO_full_error: if SPO error is used, are the full errors computed for split evaluation,
     i.e. are the alg's decision losses subtracted by the optimal decision losses? 
   
   run_in_parallel: if set to True, enables parallel computing among num_workers threads. If num_workers is not
@@ -40,11 +40,11 @@ class SPOTree(object):
   
   Keep all other parameter values as default
   '''
-  def __init__(self, **kwargs): 
+  def __init__(self, **kwargs):
     self.SPO_weight_param = kwargs["SPO_weight_param"]
     self.SPO_full_error = kwargs["SPO_full_error"]
     self.tree = MTP(**kwargs)
-  
+
   '''
   This function fits the tree on data (X,C,weights).
   
@@ -61,18 +61,20 @@ class SPOTree(object):
   
   Keep all other parameter values as default
   '''
-  def fit(self, X, C, 
+  def fit(self, X, C,
           weights=None, feats_continuous=False, verbose=False, refit_leaves=False, seed=None,
           **kwargs):
+    # INITIALIZE PARAMS.
     self.pruned = False
     self.decision_kwargs = kwargs
     num_obs = C.shape[0]
-    
-    A = np.array(range(num_obs))
-    if self.SPO_full_error == True and self.SPO_weight_param != 0.0:
+
+    # GET A: the obj. value for each cost observation.
+    A = np.array(range(num_obs)) # A: THE DECISION MADE BY OPTIMIZATION PROBLEM
+    if self.SPO_full_error == True and self.SPO_weight_param != 0.0: # If SPO weight ~= 0, decision should be made by OM.
       for i in range(num_obs):
         A[i] = find_opt_decision(C[i,:].reshape(1,-1),**kwargs)['objective'][0]
-    
+
     if self.SPO_weight_param != 0.0 and self.SPO_weight_param != 1.0:
       if self.SPO_full_error == True:
         SPO_loss_bound = -float("inf")
@@ -80,26 +82,26 @@ class SPOTree(object):
           SPO_loss = -find_opt_decision(-C[i,:].reshape(1,-1),**kwargs)['objective'][0] - A[i]
           if SPO_loss >= SPO_loss_bound:
             SPO_loss_bound = SPO_loss
-        
+
       else:
         c_max = np.max(C,axis=0)
         SPO_loss_bound = -find_opt_decision(-c_max.reshape(1,-1),**kwargs)['objective'][0]
-      
+
       #Upper bound for MSE loss: maximum pairwise difference between any two elements
       dists = distance.cdist(C, C, 'sqeuclidean')
       MSE_loss_bound = np.max(dists)
-        
+
     else:
       SPO_loss_bound = 1.0
       MSE_loss_bound = 1.0
-    
+
     #kwargs["SPO_loss_bound"] = SPO_loss_bound
     #kwargs["MSE_loss_bound"] = MSE_loss_bound
     self.tree.fit(X,A,C,
                   weights=weights, feats_continuous=feats_continuous, verbose=verbose, refit_leaves=refit_leaves, seed=seed,
                   SPO_loss_bound = SPO_loss_bound, MSE_loss_bound = MSE_loss_bound,
                   **kwargs)
-  
+
   '''
   Prints out the tree. 
   Required: call tree fit() method first
@@ -108,24 +110,24 @@ class SPOTree(object):
   '''
   def traverse(self, verbose=False):
     self.tree.traverse(verbose=verbose)
-  
+
   '''
   Prunes the tree. Set verbose=True to track progress
   '''
-  def prune(self, Xval, Cval, 
+  def prune(self, Xval, Cval,
             weights_val=None, one_SE_rule=True,verbose=False,approx_pruning=False):
     num_obs = Cval.shape[0]
-    
+
     Aval = np.array(range(num_obs))
     if self.SPO_full_error == True and self.SPO_weight_param != 0.0:
       for i in range(num_obs):
         Aval[i] = find_opt_decision(Cval[i,:].reshape(1,-1),**self.decision_kwargs)['objective'][0]
-    
+
     self.tree.prune(Xval,Aval,Cval,
                     weights_val=weights_val,one_SE_rule=one_SE_rule,verbose=verbose,approx_pruning=approx_pruning)
     self.pruned = True
-    
-  
+
+
   '''
   Produces decision or cost given data Xnew
   Required: call tree fit() method first
@@ -139,7 +141,7 @@ class SPOTree(object):
   '''
   def est_decision(self, Xnew, alpha=None, return_loc=False):
     return self.tree.predict(Xnew, np.array(range(0,Xnew.shape[0])), alpha=alpha, return_loc=return_loc)
-  
+
   def est_cost(self, Xnew, alpha=None, return_loc=False):
     return self.tree.predict(Xnew, np.array(range(0,Xnew.shape[0])), alpha=alpha, return_loc=return_loc, get_cost=True)
 
@@ -148,7 +150,7 @@ class SPOTree(object):
   '''
   def get_tree_encoding(self, x_train=None):
     return self.tree.get_tree_encoding(x_train=x_train)
-  
+
   def get_pruning_alpha(self):
     if self.pruned == True:
       return self.tree.alpha_best

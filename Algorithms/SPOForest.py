@@ -19,35 +19,35 @@ from collections import Counter
 class SPOForest(object):
   '''
   This function initializes the SPO forest
-  
+
   FOREST PARAMETERS:
-    
-  n_estimators: number of SPO trees in the random forest 
-  
+
+  n_estimators: number of SPO trees in the random forest
+
   max_features: number of features to consider when looking for the best split in each node
-  
-  run_in_parallel, num_workers: if run_in_parallel is set to True, enables parallel computing among num_workers threads. 
+
+  run_in_parallel, num_workers: if run_in_parallel is set to True, enables parallel computing among num_workers threads.
   If num_workers is not specified, uses the number of cpu cores available. The task of computing each SPO tree in the forest
   is distributed among the available cores. (each tree may only use 1 core and thus this arg is set to None in SPOTree class)
-  
+
   TREE PARAMETERS (DIRECTLY PASSED TO SPOTree CLASS):
-  
+
   max_depth: maximum training depth of each tree in the forest (default = Inf: no depth limit)
-  
+
   min_weight_per_node: the mininum number of observations (with respect to cumulative weight) per node for each tree in the forest
-  
-  quant_discret: continuous variable split points are chosen from quantiles of the variable corresponding to quant_discret,2*quant_discret,3*quant_discret, etc.. 
-  
+
+  quant_discret: continuous variable split points are chosen from quantiles of the variable corresponding to quant_discret,2*quant_discret,3*quant_discret, etc..
+
   SPO_weight_param: splits are decided through loss = SPO_loss*SPO_weight_param + MSE_loss*(1-SPO_weight_param)
     SPO_weight_param = 1.0 -> SPO loss
     SPO_weight_param = 0.0 -> MSE loss (i.e., CART)
-  
-  SPO_full_error: if SPO error is used, are the full errors computed for split evaluation, 
+
+  SPO_full_error: if SPO error is used, are the full errors computed for split evaluation,
     i.e. are the alg's decision losses subtracted by the optimal decision losses?
-  
+
   Keep all other parameter values as default
   '''
-  def __init__(self, n_estimators=10, run_in_parallel=False, num_workers=None, **kwargs): 
+  def __init__(self, n_estimators=10, run_in_parallel=False, num_workers=None, **kwargs):
     self.n_estimators = n_estimators
     if (run_in_parallel == False):
       num_workers = 1
@@ -55,11 +55,12 @@ class SPOForest(object):
       num_workers = -1 #this uses all available cpu cores
     self.run_in_parallel = run_in_parallel
     self.num_workers = num_workers
-    
+
+    # ESTABLISHING SPOTREES
     self.forest = [None]*n_estimators
     for t in range(n_estimators):
       self.forest[t] = SPOTree(**kwargs)
-  
+
   '''
   This function fits the SPO forest on data (X,C,weights).
   
@@ -76,39 +77,37 @@ class SPOForest(object):
   verbose_forest: if verbose_forest=True, prints out progress in the forest fitting procedure
   seed: seed for rng
   '''
-  def fit(self, X, C, weights=None, verbose_forest=False, seed=None, 
+  def fit(self, X, C, weights=None, verbose_forest=False, seed=None,
           feats_continuous=False, verbose=False, refit_leaves=False,
           **kwargs):
-    
+
+    # PARAMS INITIALIZATION
     self.decision_kwargs = kwargs
-    
-    num_obs = C.shape[0]
-    
+    num_obs = C.shape[0] # number of observation
     if weights is None:
-      weights = np.ones([num_obs])
-    
+      weights = np.ones([num_obs]) # all samples have identical weights
     if seed is not None:
       np.random.seed(seed)
     tree_seeds = np.random.randint(0, high=2**32-1, size=self.n_estimators)
-    
-    
+
+    # FIT THE MODEL
     if self.num_workers == 1:
       for t in range(self.n_estimators):
         if verbose_forest == True:
           print("Fitting tree " + str(t+1) + "out of " + str(self.n_estimators))
-        np.random.seed(tree_seeds[t]) 
+        np.random.seed(tree_seeds[t])
         bootstrap_inds = np.random.choice(range(num_obs), size=num_obs, replace=True)
         Xb = np.copy(X[bootstrap_inds])
         Cb = np.copy(C[bootstrap_inds])
         weights_b = np.copy(weights[bootstrap_inds])
-        self.forest[t].fit(Xb, Cb, weights=weights_b, seed=tree_seeds[t], 
+        self.forest[t].fit(Xb, Cb, weights=weights_b, seed=tree_seeds[t],
                            feats_continuous=feats_continuous, verbose=verbose, refit_leaves=refit_leaves,
                            **kwargs)
-    
+
     else:
       self.forest = Parallel(n_jobs=self.num_workers, max_nbytes=1e5)(delayed(_fit_tree)(t, self.n_estimators, self.forest[t], X, C, weights, verbose_forest, tree_seeds[t], feats_continuous=feats_continuous, verbose=verbose, refit_leaves=refit_leaves, **kwargs) for t in range(self.n_estimators))
-       
-  
+
+
   '''
   Prints all trees in the forest
   Required: call forest fit() method first
@@ -118,7 +117,7 @@ class SPOForest(object):
       print("Printing Tree " + str(t+1) + "out of " + str(self.n_estimators))
       self.forest[t].traverse()
       print("\n\n\n")
-      
+
   '''
   Predicts decisions or costs given data Xnew
   Required: call tree fit() method first
@@ -134,7 +133,7 @@ class SPOForest(object):
     if method == "mean":
       forest_costs = self.est_cost(Xnew)
       forest_decisions = find_opt_decision(forest_costs,**self.decision_kwargs)['weights']
-    
+
     elif method == "mode":
       num_obs = Xnew.shape[0]
       tree_decisions = [None]*self.n_estimators
@@ -144,27 +143,27 @@ class SPOForest(object):
       forest_decisions = np.zeros((num_obs,tree_decisions.shape[2]))
       for i in range(num_obs):
         forest_decisions[i] = _get_mode_row(tree_decisions[:,i,:])
-    
+
     return forest_decisions
-  
+
   def est_cost(self, Xnew):
     tree_costs = [None]*self.n_estimators
     for t in range(self.n_estimators):
       tree_costs[t] = self.forest[t].est_cost(Xnew)
     tree_costs = np.array(tree_costs)
-    forest_costs = np.mean(tree_costs,axis=0)    
+    forest_costs = np.mean(tree_costs,axis=0)
     return forest_costs
 
 '''
 Helper methods (ignore)
 '''
-  
+
 def _fit_tree(t, n_estimators, tree, X, C, weights, verbose_forest, tree_seed, **kwargs):
   if verbose_forest == True:
     print("Fitting tree " + str(t+1) + "out of " + str(n_estimators))
-  
+
   num_obs = C.shape[0]
-  np.random.seed(tree_seed) 
+  np.random.seed(tree_seed)
   bootstrap_inds = np.random.choice(range(num_obs), size=num_obs, replace=True)
   Xb = np.copy(X[bootstrap_inds])
   Cb = np.copy(C[bootstrap_inds])
